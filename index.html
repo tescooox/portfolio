@@ -21,16 +21,13 @@
     .page canvas { display:block; width:100%; height:auto; }
     .two-col .page { flex: 0 0 calc(50% - var(--gap)/2); }
     .one-col .page { flex: 0 0 100%; }
-    @media (max-width: 900px) {
-      .two-col .page { flex-basis:100%; }
-    }
+    @media (max-width: 900px) { .two-col .page { flex-basis:100%; } }
     footer { max-width:var(--maxw); margin:8px auto 24px; padding:0 14px; color:#666; font-size:12px; }
     #hint { color:#666; font-size:14px; margin:10px 14px 0; display:none; }
+    #error { color:#b00020; font-size:14px; margin:10px 14px 0; display:none; }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js"></script>
-  <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js";
-  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
 </head>
 <body>
   <header>
@@ -45,6 +42,7 @@
   </header>
 
   <div id="hint">If the PDF doesn’t load, <a href="SHENCHE_portfolio2025.pdf" target="_blank" rel="noopener">open it in a new tab</a>.</div>
+  <div id="error"></div>
 
   <main id="viewer" class="two-col">
     <div id="pages" class="spread"></div>
@@ -57,77 +55,61 @@
     const container = document.getElementById("pages");
     const viewer = document.getElementById("viewer");
     const hint = document.getElementById("hint");
+    const errBox = document.getElementById("error");
     const btnZoomIn = document.getElementById("zoomIn");
     const btnZoomOut = document.getElementById("zoomOut");
     const btnToggle = document.getElementById("toggleLayout");
-    let pdfDoc = null;
-    let scale = 1.0;
-    let layout = "two";
-    let rendering = false;
-    let pending = false;
+    let pdfDoc = null, scale = 1.0, layout = "two", rendering = false, pending = false;
 
-    function isTwoCol() {
-      return layout === "two" && window.innerWidth > 900;
+    function isTwoCol(){ return layout==="two" && window.innerWidth>900; }
+    function calcTargetWidth(){
+      const pad=28, total=viewer.clientWidth-pad;
+      const columns=isTwoCol()?2:1, gaps=isTwoCol()?1:0;
+      const gapPx=parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap"))||16;
+      return (total - gaps*gapPx)/columns;
     }
-    function calcTargetWidth() {
-      const pad = 28;
-      const total = viewer.clientWidth - pad;
-      const columns = isTwoCol() ? 2 : 1;
-      const gaps = isTwoCol() ? 1 : 0;
-      const gapPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 16;
-      return (total - gaps * gapPx) / columns;
-    }
-    async function render() {
-      if (!pdfDoc || rendering) { pending = true; return; }
-      rendering = true;
-      container.innerHTML = "";
+
+    async function render(){
+      if(!pdfDoc || rendering){ pending=true; return; }
+      rendering=true; container.innerHTML="";
       const targetCSSWidth = calcTargetWidth();
-      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-        const page = await pdfDoc.getPage(pageNum);
-        const viewportAt1 = page.getViewport({ scale: 1 });
-        const fitScale = targetCSSWidth / viewportAt1.width;
-        const viewport = page.getViewport({ scale: fitScale * scale });
+      for(let i=1;i<=pdfDoc.numPages;i++){
+        const page = await pdfDoc.getPage(i);
+        const vp1 = page.getViewport({scale:1});
+        const fitScale = targetCSSWidth / vp1.width;
+        const viewport = page.getViewport({scale: fitScale*scale});
         const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-        canvas.width = Math.floor(viewport.width * window.devicePixelRatio);
-        canvas.height = Math.floor(viewport.height * window.devicePixelRatio);
-        canvas.style.width = Math.floor(viewport.width) + "px";
-        canvas.style.height = Math.floor(viewport.height) + "px";
-        const renderContext = {
-          canvasContext: context,
-          viewport,
-          transform: [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0],
-        };
+        const ctx = canvas.getContext("2d");
+        canvas.width = Math.floor(viewport.width*window.devicePixelRatio);
+        canvas.height = Math.floor(viewport.height*window.devicePixelRatio);
+        canvas.style.width = Math.floor(viewport.width)+"px";
+        canvas.style.height = Math.floor(viewport.height)+"px";
         const wrapper = document.createElement("div");
-        wrapper.className = "page";
-        wrapper.appendChild(canvas);
-        container.appendChild(wrapper);
-        await page.render(renderContext).promise;
+        wrapper.className="page"; wrapper.appendChild(canvas); container.appendChild(wrapper);
+        await page.render({canvasContext:ctx, viewport, transform:[window.devicePixelRatio,0,0,window.devicePixelRatio,0,0]}).promise;
       }
-      rendering = false;
-      if (pending) { pending = false; render(); }
+      rendering=false; if(pending){ pending=false; render(); }
     }
-    pdfjsLib.getDocument(PDF_URL).promise.then(doc => {
-      pdfDoc = doc;
-      render();
-    }).catch(() => {
-      hint.style.display = "block";
+
+    pdfjsLib.getDocument(PDF_URL).promise.then(doc=>{ pdfDoc=doc; render(); })
+    .catch(e=>{
+      hint.style.display="block";
+      errBox.textContent="Failed to load PDF: "+(e&&e.message?e.message:"");
+      errBox.style.display="block";
     });
-    btnZoomIn.addEventListener("click", () => { scale = Math.min(3, scale + 0.1); render(); });
-    btnZoomOut.addEventListener("click", () => { scale = Math.max(0.3, scale - 0.1); render(); });
-    btnToggle.addEventListener("click", () => {
-      layout = layout === "two" ? "one" : "two";
-      viewer.classList.toggle("two-col", layout === "two");
-      viewer.classList.toggle("one-col", layout === "one");
-      btnToggle.textContent = layout === "two" ? "Two-Page" : "Single Page";
+
+    btnZoomIn.addEventListener("click", ()=>{ scale=Math.min(3,scale+0.1); render(); });
+    btnZoomOut.addEventListener("click", ()=>{ scale=Math.max(0.3,scale-0.1); render(); });
+    btnToggle.addEventListener("click", ()=>{
+      layout = layout==="two" ? "one" : "two";
+      viewer.classList.toggle("two-col", layout==="two");
+      viewer.classList.toggle("one-col", layout==="one");
+      btnToggle.textContent = layout==="two" ? "Two-Page" : "Single Page";
       render();
     });
+
     viewer.classList.add("two-col");
-    let resizeTimer;
-    window.addEventListener("resize", () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(render, 150);
-    });
+    let rT; window.addEventListener("resize", ()=>{ clearTimeout(rT); rT=setTimeout(render,150); });
   </script>
 </body>
 </html>
