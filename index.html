@@ -5,66 +5,129 @@
   <title>SHENCHE Portfolio 2025</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      background: #f9f9f9;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    :root { --gap: 16px; --maxw: 1400px; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; height:100%; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:#f6f6f7; color:#111; display:flex; flex-direction:column; }
+    header { position:sticky; top:0; z-index:10; background:rgba(246,246,247,.9); backdrop-filter:saturate(1.2) blur(4px); border-bottom:1px solid #eaeaea; }
+    .bar { max-width:var(--maxw); margin:0 auto; padding:10px 14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .title { font-weight:600; margin-right:auto; }
+    .btn { padding:8px 12px; border:1px solid #ddd; background:#fff; border-radius:10px; cursor:pointer; }
+    .btn:hover { background:#f2f2f2; }
+    .link { text-decoration:none; color:inherit; }
+    #viewer { max-width:var(--maxw); width:100%; margin:16px auto; padding:0 14px 24px; }
+    .spread { display:flex; flex-wrap:wrap; gap:var(--gap); align-items:flex-start; }
+    .page { background:#fff; border:1px solid #e7e7e8; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; display:flex; }
+    .page canvas { display:block; width:100%; height:auto; }
+    .two-col .page { flex: 0 0 calc(50% - var(--gap)/2); }
+    .one-col .page { flex: 0 0 100%; }
+    @media (max-width: 900px) {
+      .two-col .page { flex-basis:100%; }
     }
-    header {
-      text-align: center;
-      margin: 30px 20px 10px;
-    }
-    h1 {
-      font-size: 26px;
-      margin-bottom: 10px;
-    }
-    .links {
-      margin: 15px 0 25px;
-    }
-    .btn {
-      display: inline-block;
-      margin: 0 10px;
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      background: white;
-      text-decoration: none;
-      color: #333;
-      font-weight: 500;
-    }
-    .btn:hover {
-      background: #f0f0f0;
-    }
-    .pdf-viewer {
-      width: 90%;
-      max-width: 1000px;
-      height: 85vh;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-    }
-    footer {
-      margin: 20px;
-      font-size: 12px;
-      color: #666;
-    }
+    footer { max-width:var(--maxw); margin:8px auto 24px; padding:0 14px; color:#666; font-size:12px; }
+    #hint { color:#666; font-size:14px; margin:10px 14px 0; display:none; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js";
+  </script>
 </head>
 <body>
   <header>
-    <h1>SHENCHE Portfolio 2025</h1>
-    <div class="links">
-      <a class="btn" href="SHENCHE_portfolio2025.pdf" target="_blank">Open PDF in new tab</a>
-      <a class="btn" href="SHENCHE_portfolio2025.pdf" download>Download PDF</a>
+    <div class="bar">
+      <div class="title">SHENCHE Portfolio 2025</div>
+      <button id="toggleLayout" class="btn">Two-Page</button>
+      <button id="zoomOut" class="btn">−</button>
+      <button id="zoomIn" class="btn">+</button>
+      <a class="btn link" href="SHENCHE_portfolio2025.pdf" target="_blank" rel="noopener">Open in new tab</a>
+      <a class="btn link" href="SHENCHE_portfolio2025.pdf" download>Download PDF</a>
     </div>
   </header>
 
-  <embed class="pdf-viewer" src="SHENCHE_portfolio2025.pdf" type="application/pdf" />
+  <div id="hint">If the PDF doesn’t load, <a href="SHENCHE_portfolio2025.pdf" target="_blank" rel="noopener">open it in a new tab</a>.</div>
 
-  <footer>
-    © 2025 SHENCHE · Powered by GitHub Pages
-  </footer>
+  <main id="viewer" class="two-col">
+    <div id="pages" class="spread"></div>
+  </main>
+
+  <footer>© 2025 SHENCHE · Powered by GitHub Pages</footer>
+
+  <script>
+    const PDF_URL = "SHENCHE_portfolio2025.pdf";
+    const container = document.getElementById("pages");
+    const viewer = document.getElementById("viewer");
+    const hint = document.getElementById("hint");
+    const btnZoomIn = document.getElementById("zoomIn");
+    const btnZoomOut = document.getElementById("zoomOut");
+    const btnToggle = document.getElementById("toggleLayout");
+    let pdfDoc = null;
+    let scale = 1.0;
+    let layout = "two";
+    let rendering = false;
+    let pending = false;
+
+    function isTwoCol() {
+      return layout === "two" && window.innerWidth > 900;
+    }
+    function calcTargetWidth() {
+      const pad = 28;
+      const total = viewer.clientWidth - pad;
+      const columns = isTwoCol() ? 2 : 1;
+      const gaps = isTwoCol() ? 1 : 0;
+      const gapPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--gap")) || 16;
+      return (total - gaps * gapPx) / columns;
+    }
+    async function render() {
+      if (!pdfDoc || rendering) { pending = true; return; }
+      rendering = true;
+      container.innerHTML = "";
+      const targetCSSWidth = calcTargetWidth();
+      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const viewportAt1 = page.getViewport({ scale: 1 });
+        const fitScale = targetCSSWidth / viewportAt1.width;
+        const viewport = page.getViewport({ scale: fitScale * scale });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.width = Math.floor(viewport.width * window.devicePixelRatio);
+        canvas.height = Math.floor(viewport.height * window.devicePixelRatio);
+        canvas.style.width = Math.floor(viewport.width) + "px";
+        canvas.style.height = Math.floor(viewport.height) + "px";
+        const renderContext = {
+          canvasContext: context,
+          viewport,
+          transform: [window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0],
+        };
+        const wrapper = document.createElement("div");
+        wrapper.className = "page";
+        wrapper.appendChild(canvas);
+        container.appendChild(wrapper);
+        await page.render(renderContext).promise;
+      }
+      rendering = false;
+      if (pending) { pending = false; render(); }
+    }
+    pdfjsLib.getDocument(PDF_URL).promise.then(doc => {
+      pdfDoc = doc;
+      render();
+    }).catch(() => {
+      hint.style.display = "block";
+    });
+    btnZoomIn.addEventListener("click", () => { scale = Math.min(3, scale + 0.1); render(); });
+    btnZoomOut.addEventListener("click", () => { scale = Math.max(0.3, scale - 0.1); render(); });
+    btnToggle.addEventListener("click", () => {
+      layout = layout === "two" ? "one" : "two";
+      viewer.classList.toggle("two-col", layout === "two");
+      viewer.classList.toggle("one-col", layout === "one");
+      btnToggle.textContent = layout === "two" ? "Two-Page" : "Single Page";
+      render();
+    });
+    viewer.classList.add("two-col");
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(render, 150);
+    });
+  </script>
 </body>
 </html>
